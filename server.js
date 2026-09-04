@@ -1528,6 +1528,290 @@ app.get(
 );
 
 /* =========================================================
+   AGENCIES
+========================================================= */
+
+/* عرض الوكالات في الصفحة الرئيسية */
+
+app.get(
+    "/api/agencies/top",
+    async (req, res) => {
+        try {
+            const limit =
+                Math.min(
+                    Number(
+                        req.query.limit || 50
+                    ),
+                    100
+                );
+
+            const snapshot =
+                await db
+                    .ref("agencies")
+                    .once("value");
+
+            const data =
+                snapshot.val() || {};
+
+            const agencies =
+                Object.entries(data)
+                    .map(
+                        ([
+                            agencyId,
+                            agency
+                        ]) => ({
+                            agencyId,
+                            ...agency
+                        })
+                    )
+                    .filter(
+                        agency =>
+                            agency.deleted !== true &&
+                            agency.active !== false &&
+                            agency.type !== "SHIPPING"
+                    )
+                    .sort(
+                        (a, b) =>
+                            Number(
+                                b.activityCoins ||
+                                b.coins ||
+                                b.balance ||
+                                0
+                            ) -
+                            Number(
+                                a.activityCoins ||
+                                a.coins ||
+                                a.balance ||
+                                0
+                            )
+                    )
+                    .slice(0, limit);
+
+            res.json({
+                success: true,
+                agencies
+            });
+
+        } catch (error) {
+            console.error(
+                "Load agencies error:",
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load agencies"
+            });
+        }
+    }
+);
+
+
+/* إنشاء وكالة من لوحة الإدارة */
+
+app.post(
+    "/api/agencies",
+    requireAdminSession,
+    requireAdminPermission(
+        "agencies"
+    ),
+    async (req, res) => {
+        try {
+            const name =
+                clean(
+                    req.body.name
+                );
+
+            const ownerId =
+                clean(
+                    req.body.ownerId
+                );
+
+            if (!name) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Agency name is required"
+                });
+            }
+
+            /* لو تم إرسال صاحب وكالة */
+            if (
+                ownerId &&
+                !/^\d{8}$/.test(
+                    ownerId
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Owner ID must be 8 digits"
+                });
+            }
+
+            let owner = null;
+
+            if (ownerId) {
+                owner =
+                    await getUser(
+                        ownerId
+                    );
+
+                if (!owner) {
+                    return res.status(404).json({
+                        success: false,
+                        message:
+                            "Owner user not found"
+                    });
+                }
+            }
+
+            /* إنشاء ID وكالة من 8 أرقام */
+
+            const agencyId =
+                await generateUniqueId(
+                    "agencies",
+                    8
+                );
+
+            const agency = {
+                agencyId,
+                name,
+                ownerId:
+                    ownerId || null,
+                type: "NORMAL",
+                balance: 0,
+                coins: 0,
+                activityCoins: 0,
+                active: true,
+                deleted: false,
+                membersCount: 0,
+                createdAt: now(),
+                createdBy:
+                    req.adminSession.username
+            };
+
+            /* حفظ الوكالة */
+
+            await db
+                .ref(
+                    `agencies/${agencyId}`
+                )
+                .set(
+                    agency
+                );
+
+            /* ربط الوكالة بصاحبها */
+
+            if (ownerId) {
+                await db
+                    .ref(
+                        `users/${ownerId}`
+                    )
+                    .update({
+                        agencyId,
+                        updatedAt:
+                            now()
+                    });
+            }
+
+            res.json({
+                success: true,
+                message:
+                    "Agency created successfully",
+                agency
+            });
+
+        } catch (error) {
+            console.error(
+                "Create agency error:",
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Failed to create agency"
+            });
+        }
+    }
+);
+
+
+/* بيانات وكالة واحدة */
+
+app.get(
+    "/api/agencies/:agencyId",
+    async (req, res) => {
+        try {
+            const agencyId =
+                clean(
+                    req.params.agencyId
+                );
+
+            const snapshot =
+                await db
+                    .ref(
+                        `agencies/${agencyId}`
+                    )
+                    .once("value");
+
+            if (!snapshot.exists()) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Agency not found"
+                });
+            }
+
+            const agency = {
+                agencyId,
+                ...snapshot.val()
+            };
+
+            if (
+                agency.deleted === true ||
+                agency.active === false
+            ) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Agency not found"
+                });
+            }
+
+            let owner = null;
+
+            if (agency.ownerId) {
+                owner =
+                    await getUser(
+                        agency.ownerId
+                    );
+            }
+
+            res.json({
+                success: true,
+                agency,
+                owner
+            });
+
+        } catch (error) {
+            console.error(
+                "Get agency error:",
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load agency"
+            });
+        }
+    }
+);
+
+/* =========================================================
    ROOMS
 ========================================================= */
 
