@@ -2130,6 +2130,255 @@ app.post(
                 agencyId,
                 updatedAt: now()
             });
+/* =========================================================
+   AGENCIES
+========================================================= */
+
+app.get(
+    "/api/agencies/top",
+    async (req, res) => {
+        try {
+            const limit =
+                Math.min(
+                    Math.max(
+                        Number(
+                            req.query.limit || 4
+                        ),
+                        1
+                    ),
+                    20
+                );
+
+            const snapshot =
+                await db.ref("agencies")
+                    .once("value");
+
+            const data =
+                snapshot.val() || {};
+
+            const agencies =
+                Object.entries(data)
+                    .map(([agencyId, agency]) => ({
+                        agencyId,
+                        ...agency
+                    }))
+                    .filter(
+                        agency =>
+                            agency.deleted !==
+                                true &&
+                            agency.active !==
+                                false &&
+                            agency.type !==
+                                "SHIPPING"
+                    )
+                    .sort(
+                        (a, b) =>
+                            Number(
+                                b.activityCoins ||
+                                b.coins ||
+                                0
+                            ) -
+                            Number(
+                                a.activityCoins ||
+                                a.coins ||
+                                0
+                            )
+                    )
+                    .slice(0, limit);
+
+            res.json({
+                success: true,
+                agencies
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load agencies"
+            });
+        }
+    }
+);
+
+app.post(
+    "/api/agencies",
+    requireAuth,
+    requireOwnerOrAdmin,
+    async (req, res) => {
+        try {
+            const name =
+                clean(req.body.name);
+
+            if (!name) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Agency name is required"
+                });
+            }
+
+            const agencyId =
+                await generateUniqueId(
+                    "agencies",
+                    8
+                );
+
+            const agencyOwnerId =
+                clean(
+                    req.body.ownerId ||
+                    req.user.userId
+                );
+
+            const agency = {
+                agencyId,
+                name,
+                ownerId:
+                    agencyOwnerId,
+                type: "NORMAL",
+                balance: 0,
+                activityCoins: 0,
+                active: true,
+                deleted: false,
+                createdAt: now()
+            };
+
+            await db
+                .ref(`agencies/${agencyId}`)
+                .set(agency);
+
+            /* =================================================
+               ربط صاحب الوكالة بالمستخدم
+            ================================================= */
+
+            if (agencyOwnerId) {
+                const ownerRef =
+                    db.ref(
+                        `users/${agencyOwnerId}`
+                    );
+
+                const ownerSnapshot =
+                    await ownerRef.once(
+                        "value"
+                    );
+
+                if (ownerSnapshot.exists()) {
+                    await ownerRef.update({
+                        agencyId,
+                        updatedAt: now()
+                    });
+                }
+            }
+
+            res.json({
+                success: true,
+                agency
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Failed to create agency"
+            });
+        }
+    }
+);
+
+app.get(
+    "/api/agencies/:agencyId",
+    async (req, res) => {
+        try {
+            const snapshot =
+                await db
+                    .ref(
+                        `agencies/${req.params.agencyId}`
+                    )
+                    .once("value");
+
+            if (!snapshot.exists()) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Agency not found"
+                });
+            }
+
+            res.json({
+                success: true,
+                agency: {
+                    agencyId:
+                        req.params.agencyId,
+                    ...snapshot.val()
+                }
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load agency"
+            });
+        }
+    }
+);
+
+app.post(
+    "/api/agencies/:agencyId/members",
+    requireAuth,
+    requireOwnerOrAdmin,
+    async (req, res) => {
+        try {
+            const agencyId =
+                req.params.agencyId;
+
+            const userId =
+                clean(req.body.userId);
+
+            if (!userId) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "userId is required"
+                });
+            }
+
+            const agencySnapshot =
+                await db
+                    .ref(
+                        `agencies/${agencyId}`
+                    )
+                    .once("value");
+
+            if (!agencySnapshot.exists()) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Agency not found"
+                });
+            }
+
+            const userRef =
+                db.ref(`users/${userId}`);
+
+            const userSnapshot =
+                await userRef.once("value");
+
+            if (!userSnapshot.exists()) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "User not found"
+                });
+            }
+
+            await userRef.update({
+                agencyId,
+                updatedAt: now()
+            });
 
             res.json({
                 success: true,
